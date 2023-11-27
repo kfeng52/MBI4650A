@@ -11,9 +11,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 
-```{r cars}
+```{r Loading Packages}
 
-
+#Load packages
+library(limma)
+library(minfi)
 
 ```
 
