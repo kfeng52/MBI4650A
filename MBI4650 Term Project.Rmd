@@ -16,6 +16,60 @@ knitr::opts_chunk$set(echo = TRUE)
 #Load packages
 library(limma)
 library(minfi)
+library(ggfortify)
+library(ggplot2)
+library(QCEWAS)
+library(lattice)
+library(limma)
+library(minfi)
+library(missMethyl)
 
 ```
+
+
+```{r}
+
+#Import the data
+#Set up a path to your data directory
+idat_path <-  "/Users/kevinfeng/Downloads/MBI4650A/GSE151017_RAW 2"
+
+#Read in the sample sheet for the experiment
+targets <- read.metharray.sheet(base=idat_path, pattern="sample_sheet.csv")
+targets
+#Ensure you have 22 samples
+
+#Read in the raw data from the IDAT files
+rgSet <- read.metharray.exp(targets=targets)
+rgSet
+#Give the samples descriptive names
+sampleNames(rgSet) <- targets$Sample_Name
+rgSet
+#Calculate the detection p-values
+detP <- detectionP(rgSet)
+head(detP)
+#Remove poor quality samples
+keep <- colMeans(detP) < 0.05
+rgSet <- rgSet[,keep]
+rgSet
+#No samples were removed due to poor quality
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
