@@ -1,4 +1,11 @@
-samples,sex,age,diagnosis,group,smoking_status,pack_years,cig_daily,fvc,fev1,fev1_fvc,percent_recovery_bal,total_cells_bal_millions,cell_conc_bal_millions_pr_litre,percent_macrophages,percent_lymphocytes,percent_neutrophils,percent_basophil,mast_cells,cd4_cd8_ratio,subject_id
+[Header],,,,,,,,,,,,,,,,,,,,
+Investigator Name,n/a,,,,,,,,,,,,,,,,,,,
+Project Name,n/a,,,,,,,,,,,,,,,,,,,
+Experiment Name,n/a,,,,,,,,,,,,,,,,,,,
+Date,03/12/2023,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+[Data],,,,,,,,,,,,,,,,,,,,
+Sample_Name,sex,age,diagnosis,group,smoking_status,pack_years,cig_daily,fvc,fev1,fev1_fvc,percent_recovery_bal,total_cells_bal_millions,cell_conc_bal_millions_pr_litre,percent_macrophages,percent_lymphocytes,percent_neutrophils,percent_basophil,mast_cells,cd4_cd8_ratio,subject_id
 GSM4564348,F,22,H,HNS,NS,NA,NA,109,104,83,84,22.2,105.7,88.6,9.4,2,0,0,2.6,BAL_641
 GSM4564349,F,22,H,HNS,NS,NA,NA,123,121,85,71,29,162.9,95.2,3.6,1.2,0,0,1.1,BAL_694
 GSM4564350,F,40,H,HNS,S,5.3,5.5,111,103,80,67,49.8,332,97.4,2.4,0.2,0,1,1,BAL_698
