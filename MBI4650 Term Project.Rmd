@@ -10,7 +10,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-
 ```{r Loading Packages}
 
 #Load packages
@@ -23,49 +22,147 @@ library(lattice)
 library(limma)
 library(minfi)
 library(missMethyl)
+```
+
+
+
+```{r, Import raw data files IDATs}
+
+# Setting working directory
+setwd("/Users/kevinfeng/Downloads/MBI4650A/")
+
+# Set up a path to your data directory
+background_path <-  "/Users/kevinfeng/Downloads/MBI4650A/"
+idat_path <- "/Users/kevinfeng/Downloads/MBI4650A/GSE151017_RAW"
+
+# Read in the sample sheet for the experiment
+targets <- read.metharray.sheet(base=background_path, pattern="GSE151017_RAW.csv")
+
+# Splitting the sample name into slides and arrays
+split_values <- strsplit(targets$Sample_Name, "_")
+
+# Create new columns
+targets$sample_ID <- sapply(split_values, function(x) x[1])
+targets$Slide <- sapply(split_values, function(x) x[2])
+targets$Array <- sapply(split_values, function(x) x[3])
+
+# Set basename as the Sample Name
+targets$Basename <- file.path(idat_path, targets$Sample_Name)
+
+# Read in the raw data from the IDAT files
+rgSet <- read.metharray.exp(idat_path, targets=targets)
+
+# Give the samples descriptive names
+sampleNames(rgSet) <- targets$Sample_Name
+```
+
+
+```{r, Reviewing the metadata}
+
+colnames(targets)
+
+hist(targets$age)
+```
+
+```{r, Quality control of data - Probe and sample wise quality control}
+
+
+
+
+
+```
+
+
+```{r, Preprocessing - Normalize the data}
+# if you do not expect global differences between your samples, for instance a blood dataset, or one-tissue dataset, use the preprocessQuantile function.
+
+mSetSq <- preprocessQuantile(rgSet)
+
+densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+
+mSetSq <- preprocessFunnorm(rgSet)
+
+densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+
+mSetSq <- preprocessIllumina(rgSet)
+
+densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+
+mSetSq <- preprocessSWAN(rgSet)
+
+densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+
+mSetSq <- preprocessNoob(rgSet)
+
+densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+
+#pdf(file.path(output_path, "initial-QC.pdf"))
+#plotQC(qc)
+#dev.off()
+#qc <- getQC(mSetSq)
+#plotQC(qc)
+```
+
+
+```{r}
+# Calculate the detection p-values
+detP <- detectionP(rgSet)
+head(detP)
+
+
+# Remove poor quality samples
+keep <- colMeans(detP) < 0.05
+
+table(keep)
+
+#rgSet <- rgSet[,keep]
+
+
+#Ensure probes are in the same order in the mSetSq and detP objects
+detP <- detP[match(featureNames(mSetSq),rownames(detP)),]
+#Remove any probes that have failed in one or more samples
+keep <- rowSums(detP < 0.01) == ncol(mSetSq)
+table(keep)
+mSetSqFlt <- mSetSq[keep,]
+mSetSqFlt
+dim(mSetSqFlt)
+#This step removed around 6000 probes (may differ slightly depending on what normalization method you chose)
+
+
+#Insert your code here
+
+mSetSqFlt <- dropLociWithSnps(mSetSqFlt)
+dim(mSetSqFlt)
+
+
+#Insert your code here
+
+xReactiveProbes <- read.csv(file=paste(dataDirectory,
+                                       "PidsleyCrossReactiveEPIC.csv",
+                                       sep="/"), stringsAsFactors=FALSE)
+keep <- !(featureNames(mSetSqFlt) %in% xReactiveProbes$TargetID)
+table(keep)
+mSetSqFlt <- mSetSqFlt[keep,]
+dim(mSetSqFlt)
+
 
 ```
 
 
 ```{r}
 
-#Import the data
-#Set up a path to your data directory
-idat_path <-  "/Users/kevinfeng/Downloads/MBI4650A/GSE151017_RAW 2"
-
-#Read in the sample sheet for the experiment
-targets <- read.metharray.sheet(base=idat_path, pattern="sample_sheet.csv")
-targets
-#Ensure you have 22 samples
-
-#Read in the raw data from the IDAT files
-rgSet <- read.metharray.exp(targets=targets)
-rgSet
-#Give the samples descriptive names
-sampleNames(rgSet) <- targets$Sample_Name
-rgSet
-#Calculate the detection p-values
-detP <- detectionP(rgSet)
-head(detP)
-#Remove poor quality samples
-keep <- colMeans(detP) < 0.05
-rgSet <- rgSet[,keep]
-rgSet
-#No samples were removed due to poor quality
-
-
+#Calculate methylation beta values
+bVals <- getBeta(mSetSqFlt)
+head(bVals[,1:5])
 ```
 
 
+```{r}
+# PCA
 
 
 
-
-
-
-
-
-
+```
 
 
 
