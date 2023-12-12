@@ -50,51 +50,79 @@ targets$Array <- sapply(split_values, function(x) x[3])
 targets$Basename <- file.path(idat_path, targets$Sample_Name)
 
 # Read in the raw data from the IDAT files
-rgSet <- read.metharray.exp(idat_path, targets=targets)
-
+RGSet <- read.metharray.exp(idat_path, targets=targets)
 # Give the samples descriptive names
-sampleNames(rgSet) <- targets$Sample_Name
+sampleNames(RGSet) <- targets$Sample_Name
+
+# Creating a formal class data frame for phenotype data
+phenoData <- pData(RGSet)
+
+# Converts a RGChannelSet to a MethylSet
+MSet <- preprocessRaw(RGSet)
+
+#Calculate the detection p-values
+detP <- detectionP(RGSet)
+
 ```
 
 
 ```{r, Reviewing the metadata}
 
-colnames(targets)
+colnames(phenoData)
 
-hist(targets$age)
+annotation(RGSet)
+
 ```
 
 ```{r, Quality control of data - Probe and sample wise quality control}
 
+#Remove poor quality samples
+keep <- colMeans(detP) < 0.05
+RGSet_clean <- RGSet[,keep]
 
+# Checking if any samples were removed
+print(dim(RGSet))
+print(dim(RGSet_clean))
+#No samples were removed due to poor quality
 
+#Sex Prediction Checks are unappliable as all samples are females 
 
+# QC plot
+qc <- getQC(MSet) # using the PreprocessRaw dataset 
+plotQC(qc) 
+
+# Density Plot of beta values 
+densityPlot(MSet, sampGroups = phenoData$Sample_Group)
+
+# Density Bean Plot of beta values 
+densityBeanPlot(MSet, sampGroups = phenoData$Sample_Group)
 
 ```
+
 
 
 ```{r, Preprocessing - Normalize the data}
 # if you do not expect global differences between your samples, for instance a blood dataset, or one-tissue dataset, use the preprocessQuantile function.
 
-mSetSq <- preprocessQuantile(rgSet)
+mSetSq.quantile <- preprocessQuantile(RGSet)
 
-densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+densityPlot(getBeta(mSetSq.quantile), sampGroups = mSetSq.quantile$Group, main = "Normalized")
 
-mSetSq <- preprocessFunnorm(rgSet)
+mSetSq.functional <- preprocessFunnorm(RGSet)
 
-densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+densityPlot(getBeta(mSetSq.functional), sampGroups = mSetSq.functional$Group, main = "Normalized")
 
-mSetSq <- preprocessIllumina(rgSet)
+mSetSq.illumina <- preprocessIllumina(RGSet)
 
-densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+densityPlot(getBeta(mSetSq.illumina), sampGroups = mSetSq.illumina$Group, main = "Normalized")
 
-mSetSq <- preprocessSWAN(rgSet)
+mSetSq.swan <- preprocessSWAN(RGSet)
 
-densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+densityPlot(getBeta(mSetSq.swan), sampGroups = mSetSq.swan$Group, main = "Normalized")
 
-mSetSq <- preprocessNoob(rgSet)
+mSetSq.noob <- preprocessNoob(RGSet)
 
-densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
+densityPlot(getBeta(mSetSq.noob), sampGroups = mSetSq.noob$Group, main = "Normalized")
 
 #pdf(file.path(output_path, "initial-QC.pdf"))
 #plotQC(qc)
@@ -104,39 +132,25 @@ densityPlot(getBeta(mSetSq), sampGroups = mSetSq$Group, main = "Normalized")
 ```
 
 
-```{r}
-# Calculate the detection p-values
-detP <- detectionP(rgSet)
-head(detP)
-
-
-# Remove poor quality samples
-keep <- colMeans(detP) < 0.05
-
-table(keep)
-
-#rgSet <- rgSet[,keep]
-
+```{r, Removal of Probes}
 
 #Ensure probes are in the same order in the mSetSq and detP objects
-detP <- detP[match(featureNames(mSetSq),rownames(detP)),]
+detP <- detP[match(featureNames(mSetSq.quantile),rownames(detP)),]
+
+
 #Remove any probes that have failed in one or more samples
-keep <- rowSums(detP < 0.01) == ncol(mSetSq)
+keep <- rowSums(detP < 0.01) == ncol(mSetSq.quantile)
 table(keep)
-mSetSqFlt <- mSetSq[keep,]
+mSetSqFlt <- mSetSq.quantile[keep,]
 mSetSqFlt
 dim(mSetSqFlt)
 #This step removed around 6000 probes (may differ slightly depending on what normalization method you chose)
 
-
-#Insert your code here
-
+# Remove probes with SNPs at the CpG site
 mSetSqFlt <- dropLociWithSnps(mSetSqFlt)
 dim(mSetSqFlt)
 
-
-#Insert your code here
-
+# Removing cross-reactive probes
 xReactiveProbes <- read.csv(file=paste(dataDirectory,
                                        "PidsleyCrossReactiveEPIC.csv",
                                        sep="/"), stringsAsFactors=FALSE)
@@ -145,12 +159,19 @@ table(keep)
 mSetSqFlt <- mSetSqFlt[keep,]
 dim(mSetSqFlt)
 
+```
+
+
+
+
+
+
+
 
 ```
 
 
 ```{r}
-
 #Calculate methylation beta values
 bVals <- getBeta(mSetSqFlt)
 head(bVals[,1:5])
@@ -160,6 +181,17 @@ head(bVals[,1:5])
 ```{r}
 # PCA
 
+#Run PCA on your dataframe of interest (all CpGs/Samples), here is some sample code. 
+#In mDataNAT, you want rows to be samples and columns to be CpGs
+#We also must remove all NAs prior to running PCA
+mdataNA <- na.omit(mdata) 
+mDataNAT <- t(mdataNA) 
+#Check that rows are samples and columns are features*
+pcaMdata <- prcomp(mDataNAT, center=TRUE, scale=FALSE) 
+attributes(pcaMdata) 
+summary(pcaMdata) 
+PCs = pcaMdata$x 
+head(PCs)
 
 
 ```
