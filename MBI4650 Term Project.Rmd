@@ -11,8 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r Loading Packages}
-
-#Load packages
+#Load required packages
 library(limma)
 library(minfi)
 library(ggfortify)
@@ -22,35 +21,44 @@ library(lattice)
 library(limma)
 library(minfi)
 library(missMethyl)
+library(factoextra)
+library(dplyr)
+library(pathview)
+library(FlowSorted.Blood.EPIC)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
 ```
 
 
-
+## Importing Raw Data
 ```{r, Import raw data files IDATs}
+# The raw data was taken from the Gene Expression Omnibus 
+# Title: Methylome signature of bronchoalveolar cells from Multiple Sclerosis patients in relation to smoking
+# Link: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE151017
 
 # Setting working directory
 setwd("/Users/kevinfeng/Downloads/MBI4650A/")
 
-# Set up a path to your data directory
-background_path <-  "/Users/kevinfeng/Downloads/MBI4650A/"
+# Set up a path to data directory
+background_path <-  "/Users/kevinfeng/Downloads/MBI4650A"
 idat_path <- "/Users/kevinfeng/Downloads/MBI4650A/GSE151017_RAW"
 
-# Read in the sample sheet for the experiment
+# Read in the background information sheet for the experiment
 targets <- read.metharray.sheet(base=background_path, pattern="GSE151017_RAW.csv")
 
 # Splitting the sample name into slides and arrays
 split_values <- strsplit(targets$Sample_Name, "_")
 
-# Create new columns
-targets$sample_ID <- sapply(split_values, function(x) x[1])
-targets$Slide <- sapply(split_values, function(x) x[2])
-targets$Array <- sapply(split_values, function(x) x[3])
+# Creating new columns  
+targets$sample_ID <- sapply(split_values, function(x) x[1]) # for sample ID
+targets$slide <- sapply(split_values, function(x) x[2]) # for slide number 
+targets$array <- sapply(split_values, function(x) x[3]) # for array number 
 
-# Set basename as the Sample Name
+# Creating a column for basename
 targets$Basename <- file.path(idat_path, targets$Sample_Name)
 
-# Read in the raw data from the IDAT files
+# Read in the EPIC array data from the IDAT files
 RGSet <- read.metharray.exp(idat_path, targets=targets)
+
 # Give the samples descriptive names
 sampleNames(RGSet) <- targets$Sample_Name
 
@@ -59,6 +67,7 @@ phenoData <- pData(RGSet)
 
 # Converts a RGChannelSet to a MethylSet
 MSet <- preprocessRaw(RGSet)
+sampleNames(MSet) <- targets$subject_id
 
 #Calculate the detection p-values
 detP <- detectionP(RGSet)
@@ -66,14 +75,20 @@ detP <- detectionP(RGSet)
 ```
 
 
+## Reviewing Metadata
 ```{r, Reviewing the metadata}
 
+# Reviewing the meta data
 colnames(phenoData)
 
+# Viewing the type of array 
 annotation(RGSet)
 
-```
+# Viewing more about the types of probes
+getManifest(RGSet)
 
+```
+## Quality Control 
 ```{r, Quality control of data - Probe and sample wise quality control}
 
 #Remove poor quality samples
@@ -100,101 +115,688 @@ densityBeanPlot(MSet, sampGroups = phenoData$Sample_Group)
 ```
 
 
-
+## Normalization 
 ```{r, Preprocessing - Normalize the data}
-# if you do not expect global differences between your samples, for instance a blood dataset, or one-tissue dataset, use the preprocessQuantile function.
 
+# Quantile Normalization 
 mSetSq.quantile <- preprocessQuantile(RGSet)
-
 densityPlot(getBeta(mSetSq.quantile), sampGroups = mSetSq.quantile$Group, main = "Normalized")
 
-mSetSq.functional <- preprocessFunnorm(RGSet)
+# Functional Normalization 
+#mSetSq.functional <- preprocessFunnorm(RGSet)
+#densityPlot(getBeta(mSetSq.functional), sampGroups = mSetSq.functional$Group, main = "Normalized")
 
-densityPlot(getBeta(mSetSq.functional), sampGroups = mSetSq.functional$Group, main = "Normalized")
+# Illumina Normalization 
+#mSetSq.illumina <- preprocessIllumina(RGSet)
+#densityPlot(getBeta(mSetSq.illumina), sampGroups = mSetSq.illumina$Group, main = "Normalized")
 
-mSetSq.illumina <- preprocessIllumina(RGSet)
+# SWAN Normalization 
+#mSetSq.swan <- preprocessSWAN(RGSet)
+#densityPlot(getBeta(mSetSq.swan), sampGroups = mSetSq.swan$Group, main = "Normalized")
 
-densityPlot(getBeta(mSetSq.illumina), sampGroups = mSetSq.illumina$Group, main = "Normalized")
+# Noob Normalization 
+#mSetSq.noob <- preprocessNoob(RGSet)
+#densityPlot(getBeta(mSetSq.noob), sampGroups = mSetSq.noob$Group, main = "Normalized")
 
-mSetSq.swan <- preprocessSWAN(RGSet)
-
-densityPlot(getBeta(mSetSq.swan), sampGroups = mSetSq.swan$Group, main = "Normalized")
-
-mSetSq.noob <- preprocessNoob(RGSet)
-
-densityPlot(getBeta(mSetSq.noob), sampGroups = mSetSq.noob$Group, main = "Normalized")
-
-#pdf(file.path(output_path, "initial-QC.pdf"))
-#plotQC(qc)
-#dev.off()
-#qc <- getQC(mSetSq)
-#plotQC(qc)
 ```
 
-
+## Probe Removal 
 ```{r, Removal of Probes}
 
 #Ensure probes are in the same order in the mSetSq and detP objects
 detP <- detP[match(featureNames(mSetSq.quantile),rownames(detP)),]
 
+# Getting the Dimension of the probes before removal
+dim(mSetSq.quantile)
 
 #Remove any probes that have failed in one or more samples
 keep <- rowSums(detP < 0.01) == ncol(mSetSq.quantile)
-table(keep)
 mSetSqFlt <- mSetSq.quantile[keep,]
-mSetSqFlt
-dim(mSetSqFlt)
-#This step removed around 6000 probes (may differ slightly depending on what normalization method you chose)
+dim(mSetSqFlt) # Getting the new number of probes 
 
 # Remove probes with SNPs at the CpG site
 mSetSqFlt <- dropLociWithSnps(mSetSqFlt)
-dim(mSetSqFlt)
+dim(mSetSqFlt) # Getting the new number of probes
 
 # Removing cross-reactive probes
-xReactiveProbes <- read.csv(file=paste(dataDirectory,
-                                       "PidsleyCrossReactiveEPIC.csv",
-                                       sep="/"), stringsAsFactors=FALSE)
+xReactiveProbes <- read.csv(file=paste(background_path, 
+                            "PidsleyCrossReactiveEPIC.csv" # based on Pidsley Cross Reactive Probes  
+                            , sep="/"), stringsAsFactors=FALSE) 
 keep <- !(featureNames(mSetSqFlt) %in% xReactiveProbes$TargetID)
-table(keep)
 mSetSqFlt <- mSetSqFlt[keep,]
-dim(mSetSqFlt)
+dim(mSetSqFlt) # Getting the new number of probes
 
 ```
 
-
-
-
-
-
-
-
-```
-
-
+## Calculating Beta Values
 ```{r}
 #Calculate methylation beta values
+
 bVals <- getBeta(mSetSqFlt)
-head(bVals[,1:5])
+head(bVals[,1:5]) # First 6 beta values for the first 5 samples
+
+```
+
+```{r}
+
+
+```
+
+
+
+## Principal Component Analysis
+```{r, PCA}
+
+# Run PCA on your dataframe of interest CpGs 
+mdataNA <- na.omit(bVals) # we also must remove all NAs prior to running PCA
+mDataNAT <- t(mdataNA) # transposing the data 
+pcaMdata <- prcomp(mDataNAT, center=TRUE, scale=FALSE) # running PCA analysis 
+PCs = pcaMdata$x # extracting the PCA scores
+
+
+#Plot the PCA results 
+#Visualize (scree plot). Show the percentage of variances explained by each principal component.
+fviz_eig(pcaMdata)
+
+#Pull Out First 5 PCs
+PC1<-pcaMdata$x[,1]
+PC2<-pcaMdata$x[,2]
+PC3<-pcaMdata$x[,3]
+PC4<-pcaMdata$x[,4]
+PC5<-pcaMdata$x[,5]
+
+```
+
+## Determining PCA Outliers
+```{r, PCA Outliers}
+#Determining PCA Outliers 
+sample_outliers=c()
+alloutliers=c()
+for(i in 1:5){
+  a<-subset(rownames(pcaMdata$x), pcaMdata$x[,i] > (mean(pcaMdata$x[,i])+3*sd(pcaMdata$x[,i])))
+  b<-subset(rownames(pcaMdata$x), pcaMdata$x[,i] < (mean(pcaMdata$x[,i])-3*sd(pcaMdata$x[,i])))
+  out<-c(a,b)
+  sample_outliers <- c(sample_outliers,out)
+  print(paste("outliers in PCA",i,":",sep=""))
+  print(sample_outliers)
+  alloutliers=c(alloutliers,sample_outliers)
+  sample_outliers=c()
+}	
+outlier<-unique(alloutliers)
+outlier
+
 ```
 
 
 ```{r}
-# PCA
 
-#Run PCA on your dataframe of interest (all CpGs/Samples), here is some sample code. 
-#In mDataNAT, you want rows to be samples and columns to be CpGs
-#We also must remove all NAs prior to running PCA
-mdataNA <- na.omit(mdata) 
-mDataNAT <- t(mdataNA) 
-#Check that rows are samples and columns are features*
-pcaMdata <- prcomp(mDataNAT, center=TRUE, scale=FALSE) 
-attributes(pcaMdata) 
-summary(pcaMdata) 
-PCs = pcaMdata$x 
-head(PCs)
+#First we will merge the PCs with our pdata
+pdataPCs <- merge(targets, PCs, by.="Sample_Name", by.y="row.names")
 
+# Removing PCA Outliers (GSM4564375_200861170067_R01C01)
+nrow(pdataPCs)
+pdataPCs <- subset(pdataPCs, subset = !(Sample_Name == "GSM4564375_200861170067_R01C01"))
+nrow(pdataPCs) # Showing that one sample was removed 
 
 ```
+
+# Comparing the DNA Methylation from people who smoke to people who don't smoke
+## Creating PCA Correlation Matrix - 
+```{r}
+
+pdataPCs_all <- pdataPCs
+
+pdataPCs <- subset(pdataPCs, subset = !(group == "MSS" | group == "MSNS"))
+
+# Confirming correct classes
+pdataPCs$group <- as.factor(pdataPCs$group)
+pdataPCs$slide <- as.factor(pdataPCs$slide)
+pdataPCs$array <- as.factor(pdataPCs$array)
+pdataPCs$group <- as.factor(pdataPCs$group)
+pdataPCs$age <- as.numeric(pdataPCs$age)
+pdataPCs$fev1_fvc <- as.numeric(pdataPCs$fev1_fvc)
+pdataPCs$total_cells_bal_millions <- as.numeric(pdataPCs$total_cells_bal_millions)
+pdataPCs$percent_recovery_bal <- as.numeric(pdataPCs$percent_recovery_bal)
+pdataPCs$percent_macrophages <- as.numeric(pdataPCs$percent_macrophages)
+pdataPCs$percent_lymphocytes <- as.numeric(pdataPCs$percent_lymphocytes)
+pdataPCs$cd4_cd8_ratio <- as.numeric(pdataPCs$cd4_cd8_ratio)
+str(pdataPCs)
+
+# Creating a PDF of the Correlation Matrix 
+pdf("correlation_plot1.pdf")
+twolines = function(x,y) {
+  points(x,y,pch=20, col=pdataPCs$group)
+  abline(lm(y~x),col="red")
+}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y, use="complete.obs"))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+mydiag.panel <- function( x,  labels, ...){
+  ll <- par("usr")
+  rect(ll[1], ll[3], ll[2], ll[4], col="darkolivegreen1")
+}
+
+# Labeling the PCA Correlation Matrix 
+diag.labels=c("group","age","slide","array","fev1_fvc","cell conc","%macrophages",
+              "%lymphocytes","%neutrophils","%basophil","mast_cells","cd4/cd8","PC1", 
+              "PC2", "PC3", "PC4", "PC5")
+
+# Inputing the attributes into the correlation matrix 
+plot.formula=as.formula(~group+age+slide+array+fev1_fvc+cell_conc_bal_millions_pr_litre+percent_macrophages+percent_lymphocytes+percent_neutrophils+percent_basophil+mast_cells+cd4_cd8_ratio+PC1+PC2+PC3+PC4+PC5)
+
+pairs(plot.formula, data=pdataPCs, upper.panel=twolines, labels=diag.labels, diag.panel=mydiag.panel, lower.panel=panel.cor, label.pos=0.5, main="Correlation Between Variables")
+dev.off()
+
+```
+
+## Designing Model
+```{r, Model Design - Smoking comparison between Healthy samples}
+
+# Isolating the smoking groups 
+levels(pdataPCs$group) <- c("HNS", "HS")
+
+#Designing the model
+design <- model.matrix(~0+group+age+slide+array+percent_macrophages+percent_neutrophils+percent_basophil+
+                         mast_cells+cd4_cd8_ratio+PC2+PC4+PC5, data=targets)
+
+#Fit the actual linear model to the data
+fit <- lmFit(bVals, design)
+
+#Create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(groupHNS-groupHS, levels=design)
+
+#Fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+
+#Rank genes
+fit2 <- eBayes(fit2)
+
+#Get the table of results
+DMPs <- topTable(fit2, num=Inf, coef=1)
+head(DMPs)
+
+# Number of significant CpGs, FDR < 0.05
+summary(decideTests(fit2))
+
+```
+
+## QQ Plot
+```{r, QQplot }
+
+#qqplot of the results
+pvals <- DMPs$P.Value
+observed <- sort(pvals)
+lobs <- -(log10(observed))
+expected <- c(1:length(observed)) 
+lexp <- -(log10(expected / (length(expected)+1)))
+m="qqplot"
+plot(c(0,7), c(0,7), col="red", lwd=4, type="l", xlab="Expected (-logP)",
+     ylab="Observed (-logP)", xlim=c(0,7), ylim=c(0,7), las=1, xaxs="i", yaxs="i", bty="l", main=m)
+points(lexp, lobs, pch=23, cex=.5, col="black", bg="black")
+
+#Calculate lambda
+P_lambda(pvals)
+
+```
+
+## Multiple Test Correction
+```{r}
+
+#Adjust the pvalues, convert them to FDRs
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+head(sort(pvals_fdr))
+
+```
+
+## Validating Cell Composition
+```{r}
+
+# Unfortuante, this is uncompatible for my version of R 
+# CC <- estimateCellCounts(RGSet, compositeCellType = "Blood",
+#                   processMethod = "preprocessQuantile", probeSelect = "auto",
+#                   cellTypes = c("Bcell", "CD4T", "CD8T", "Eos", "Gran", "Mono", "Neu", "NK"),
+#                   referencePlatform = "IlluminaHumanMethylationEPIC",
+#                   returnAll = FALSE, meanPlot = FALSE, verbose = TRUE)
+
+```
+
+
+## Top 100 significant CpGs
+```{r, Top 100 significant CpGs}
+
+# Getting the top 100 significant CpGs 
+sigDMP <- head(DMPs, 100)
+
+```
+
+## Annotation
+```{r, Annotation}
+
+#Read in EPIC array annotation data
+ann <- getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+ann <- as.data.frame(ann)
+
+# Calculating differentially methylated sites
+DMS <- merge(DMPs, ann, by.x="row.names", by.y="row.names")
+
+```
+
+
+```{r, Manhattan Plot}
+
+colnames(DMS)[2] <- "estimate"
+colnames(DMS)[5] <- "P.Value"
+colnames(DMS)[8] <- "chr"
+colnames(DMS)[9] <- "start"
+
+#Convert chr format to format with the leading 'chr'
+DMS$chr <- gsub("^.{0,3}", "", DMS$chr)
+
+manhattan<-function(DMS, filename, sig=NULL){
+	data<-DMS
+	data<-subset(data, (data$chr!="0"))
+	data<-subset(data, (data$start!="NA"))
+	data<-subset(data, (data$chr!="X"))
+	data<-subset(data, (data$chr!="Y"))
+	data$chr <- gsub("chr","",data$chr)
+	data$chr <- as.numeric(data$chr)
+	data2 <- data[order(data$chr),]
+	data=data2
+	if (is.null(sig)==TRUE){
+		ymin1=round(max(-log10(data$P.Value))+1)
+	}
+	else{
+		ymin1=16
+	}
+	title=c()
+	pdf(paste("manhattan_", filename, ".pdf",sep=""),width = 40,height = 12)
+	chr <- c(1:22)
+	#Summary statistics
+	data$position<-round(data$start,digits=0)
+	#print(summary(data))
+	print(table(data$chr))
+	par(mar=c(5,5,2,2))
+	phy.max<-tapply(data$start, data$chr,max,na.rm=T)
+	cumlen=0
+	for(i in chr){
+		cat(paste("Now working on chromosome ",i,"\r"))
+		data[data$chr==i,"loc"]<-data[data$chr==i,"position"]+cumlen
+		cumlen<-cumlen+phy.max[i]
+	}
+	phy.med<-tapply(data$loc,data$chr,median,na.rm=T)[chr]
+	print(phy.med)
+	data$mlgpval<- -log(data[,"P.Value"], base=10)
+	plot(data[,"loc"],data[,"mlgpval"],type="n",yaxt="n",xaxt="n",
+		xlab="chromosome",
+		ylab=expression(-log[10]*P),main=title,
+		xlim=c(0,max(data$loc,na.rm=T)),cex.lab=1.5,ylim=c(0,ymin1))
+		col=ifelse(data$mlgpval< 10, (rep(c("black","gray48"),13)), "red" )
+	axis(side=2, at=seq(from=0,to=ymin1,by=2), labels=seq(from=0,to=ymin1,by=2),
+		tick=T,cex.axis=0.9,las=1)
+	axis(side=1, at=phy.med[c(1:22)], labels=chr[c(1:22)],
+		tick=T,cex.axis=0.6,las=1)
+	rect(par("usr")[1], par("usr")[3], par("usr")[2], par("usr")[4],
+		col = "white")
+	for(i in chr){
+		cat(paste("Now working on chromosome ",i,"\r"))
+		points(data[data$chr==i,"loc"],data[data$chr==i,"mlgpval"],
+			col=ifelse(data[data$chr==i,"mlgpval"] > 6.3, "red", col[i]),pch=20,cex=data[data$chr==i,"cex.val"])
+	}
+	if (is.null(sig)==FALSE){
+		abline(h=sig,lty="dotted",lwd=2,col="chartreuse4")
+	}
+
+	dev.off()
+}
+
+manhattan(DMS=DMS, filename="Manhattan", sig=6.3)
+```
+
+## GO Analysis 
+```{r, GO Analysis}
+
+# Perform Gene Ontology (GO) analysis using the 'gometh' function
+# Input:
+#   - sigDMP: Data frame with significantly differentially methylated positions
+#   - DMPs: Data frame with all differentially methylated positions
+#   - collection: Gene set collection for enrichment analysis (e.g., "KEGG")
+#   - array.type: Type of methylation array used (e.g., "EPIC")
+#   - anno: Annotation object (e.g., 'ann')
+
+go_analysis.all <- gometh(sig.cpg = row.names(sigDMP), all.cpg = row.names(DMPs), 
+                          collection = "KEGG", array.type = "EPIC", anno = ann)
+
+
+# Print the number of rows (observations) in the 'sigDMP' and 'DMPs' data frames
+nrow(sigDMP)
+nrow(DMPs)
+
+# Print the sum of differentially expressed (DE) positions identified in GO analysis
+# The DE positions represent the ones with significant enrichment in the specified gene set collection
+sum(go_analysis.all$DE)
+
+# Print the total number of positions analyzed in GO analysis
+sum(go_analysis.all$N)
+
+# Extract the top 10 results from the GO analysis
+top_10 <- topGSA(go_analysis.all, 10)
+
+# Print or further analyze the top 10 results
+top_10
+```
+
+
+## KEGGA
+```{r, KEGGA Analysis}
+
+# Extract Entrez Gene IDs for significantly differentially methylated positions (DMPs)
+sig_genes <- getMappedEntrezIDs(sig.cpg = row.names(sigDMP), all.cpg = row.names(DMPs), array.type = "EPIC", anno = ann)
+
+# Perform KEGG pathway analysis using Entrez Gene IDs
+# Input:
+#   - sig_genes$sig.eg: Entrez Gene IDs for significantly differentially methylated positions
+#   - sig_genes$universe: Entrez Gene IDs for all differentially methylated positions
+#   - species: Species for which KEGG pathway analysis is performed (e.g., "Hs" for Homo sapiens)
+kegga_results <- kegga(sig_genes$sig.eg, universe = sig_genes$universe, species = "Hs")
+
+# Arrange the results by adjusted p-value (P.DE)
+kegga_results <- kegga_results %>% arrange(P.DE)
+
+# Add a new column 'KEGG_label' containing row names (KEGG pathway labels)
+kegga_results$KEGG_label <- rownames(kegga_results)
+
+# Display the first few rows of the KEGG pathway analysis results
+head(kegga_results)
+
+# Extract top KEGG pathway enrichment results using the 'topKEGG' function
+KEGG_enrich <- topKEGG(kegga_results)
+
+# Display the top KEGG pathway enrichment results
+KEGG_enrich
+```
+
+
+
+```{r}
+
+temp <- na.omit(sigDMP)
+geneData <- as.numeric(temp$logFC)
+names(geneData) <- temp$Entrez
+
+
+pdf(file="hsa04728.pdf")
+pathways <- pathview(gene.data = geneData, pathway.id = "04728", species = "hsa", gene.idtype="ENTREZ", out.suffix = "RNA")
+```
+
+
+
+
+# Comparing the DNA Methylation of People who Smoke 
+## Creating PCA Correlation Matrix - Comparing MS and MS+Smoking
+```{r}
+
+pdataPCs <- subset(pdataPCs_all, subset = !(group == "HNS" | group == "HS"))
+
+# Confirming correct classes
+pdataPCs$group <- as.factor(pdataPCs$group)
+pdataPCs$slide <- as.factor(pdataPCs$slide)
+pdataPCs$array <- as.factor(pdataPCs$array)
+pdataPCs$group <- as.factor(pdataPCs$group)
+pdataPCs$age <- as.numeric(pdataPCs$age)
+pdataPCs$fev1_fvc <- as.numeric(pdataPCs$fev1_fvc)
+pdataPCs$total_cells_bal_millions <- as.numeric(pdataPCs$total_cells_bal_millions)
+pdataPCs$percent_recovery_bal <- as.numeric(pdataPCs$percent_recovery_bal)
+pdataPCs$percent_macrophages <- as.numeric(pdataPCs$percent_macrophages)
+pdataPCs$percent_lymphocytes <- as.numeric(pdataPCs$percent_lymphocytes)
+pdataPCs$cd4_cd8_ratio <- as.numeric(pdataPCs$cd4_cd8_ratio)
+str(pdataPCs)
+
+# Creating a PDF of the Correlation Matrix 
+pdf("correlation_plot2.pdf")
+twolines = function(x,y) {
+  points(x,y,pch=20, col=pdataPCs$group)
+  abline(lm(y~x),col="red")
+}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y, use="complete.obs"))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+mydiag.panel <- function( x,  labels, ...){
+  ll <- par("usr")
+  rect(ll[1], ll[3], ll[2], ll[4], col="darkolivegreen1")
+}
+
+# Labeling the PCA Correlation Matrix 
+diag.labels=c("group","age","slide","array","fev1_fvc","cell conc","%macrophages",
+              "%lymphocytes","%neutrophils","%basophil","mast_cells","cd4/cd8","PC1", 
+              "PC2", "PC3", "PC4", "PC5")
+
+# Inputing the attributes into the correlation matrix 
+plot.formula=as.formula(~group+age+slide+array+fev1_fvc+cell_conc_bal_millions_pr_litre+percent_macrophages+percent_lymphocytes+percent_neutrophils+percent_basophil+mast_cells+cd4_cd8_ratio+PC1+PC2+PC3+PC4+PC5)
+
+pairs(plot.formula, data=pdataPCs, upper.panel=twolines, labels=diag.labels, diag.panel=mydiag.panel, lower.panel=panel.cor, label.pos=0.5, main="Correlation Between Variables")
+dev.off()
+
+```
+
+## Designing Model
+```{r, Model Design - Smoking comparison between Healthy samples}
+
+# Isolating the smoking groups 
+levels(pdataPCs$group) <- c("MSNS", "MSS")
+
+#Designing the model
+design <- model.matrix(~0+group+age+slide+array+percent_neutrophils+cd4_cd8_ratio+PC1+PC2+PC3+PC4+PC5, data=targets)
+
+#Fit the actual linear model to the data
+fit <- lmFit(bVals, design)
+
+#Create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(groupHNS-groupHS, levels=design)
+
+#Fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+
+#Rank genes
+fit2 <- eBayes(fit2)
+
+#Get the table of results
+DMPs <- topTable(fit2, num=Inf, coef=1)
+head(DMPs)
+
+# Number of significant CpGs, FDR < 0.05
+summary(decideTests(fit2))
+
+```
+
+## QQ Plot
+```{r, QQplot }
+
+#qqplot of the results
+pvals <- DMPs$P.Value
+observed <- sort(pvals)
+lobs <- -(log10(observed))
+expected <- c(1:length(observed)) 
+lexp <- -(log10(expected / (length(expected)+1)))
+m="qqplot"
+plot(c(0,7), c(0,7), col="red", lwd=4, type="l", xlab="Expected (-logP)",
+     ylab="Observed (-logP)", xlim=c(0,7), ylim=c(0,7), las=1, xaxs="i", yaxs="i", bty="l", main=m)
+points(lexp, lobs, pch=23, cex=.5, col="black", bg="black")
+
+#Calculate lambda
+P_lambda(pvals)
+
+```
+
+## Multiple Test Correction
+```{r}
+
+#Adjust the pvalues, convert them to FDRs
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+head(sort(pvals_fdr))
+
+```
+
+## Annotation
+```{r, Annotation}
+
+#Read in EPIC array annotation data
+ann <- getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+ann <- as.data.frame(ann)
+
+# Calculating differentially methylated sites
+DMS <- merge(DMPs, ann, by.x="row.names", by.y="row.names")
+
+```
+
+
+
+```{r, Manhattan Plot}
+
+colnames(DMS)[2] <- "estimate"
+colnames(DMS)[5] <- "P.Value"
+colnames(DMS)[8] <- "chr"
+colnames(DMS)[9] <- "start"
+
+#Convert chr format to format with the leading 'chr'
+DMS$chr <- gsub("^.{0,3}", "", DMS$chr)
+
+manhattan<-function(DMS, filename, sig=NULL){
+	data<-DMS
+	data<-subset(data, (data$chr!="0"))
+	data<-subset(data, (data$start!="NA"))
+	data<-subset(data, (data$chr!="X"))
+	data<-subset(data, (data$chr!="Y"))
+	data$chr <- gsub("chr","",data$chr)
+	data$chr <- as.numeric(data$chr)
+	data2 <- data[order(data$chr),]
+	data=data2
+	if (is.null(sig)==TRUE){
+		ymin1=round(max(-log10(data$P.Value))+1)
+	}
+	else{
+		ymin1=16
+	}
+	title=c()
+	pdf(paste("manhattan_", filename, ".pdf",sep=""),width = 40,height = 12)
+	chr <- c(1:22)
+	#Summary statistics
+	data$position<-round(data$start,digits=0)
+	#print(summary(data))
+	print(table(data$chr))
+	par(mar=c(5,5,2,2))
+	phy.max<-tapply(data$start, data$chr,max,na.rm=T)
+	cumlen=0
+	for(i in chr){
+		cat(paste("Now working on chromosome ",i,"\r"))
+		data[data$chr==i,"loc"]<-data[data$chr==i,"position"]+cumlen
+		cumlen<-cumlen+phy.max[i]
+	}
+	phy.med<-tapply(data$loc,data$chr,median,na.rm=T)[chr]
+	print(phy.med)
+	data$mlgpval<- -log(data[,"P.Value"], base=10)
+	plot(data[,"loc"],data[,"mlgpval"],type="n",yaxt="n",xaxt="n",
+		xlab="chromosome",
+		ylab=expression(-log[10]*P),main=title,
+		xlim=c(0,max(data$loc,na.rm=T)),cex.lab=1.5,ylim=c(0,ymin1))
+		col=ifelse(data$mlgpval< 10, (rep(c("black","gray48"),13)), "red" )
+	axis(side=2, at=seq(from=0,to=ymin1,by=2), labels=seq(from=0,to=ymin1,by=2),
+		tick=T,cex.axis=0.9,las=1)
+	axis(side=1, at=phy.med[c(1:22)], labels=chr[c(1:22)],
+		tick=T,cex.axis=0.6,las=1)
+	rect(par("usr")[1], par("usr")[3], par("usr")[2], par("usr")[4],
+		col = "white")
+	for(i in chr){
+		cat(paste("Now working on chromosome ",i,"\r"))
+		points(data[data$chr==i,"loc"],data[data$chr==i,"mlgpval"],
+			col=ifelse(data[data$chr==i,"mlgpval"] > 6.3, "red", col[i]),pch=20,cex=data[data$chr==i,"cex.val"])
+	}
+	if (is.null(sig)==FALSE){
+		abline(h=sig,lty="dotted",lwd=2,col="chartreuse4")
+	}
+
+	dev.off()
+}
+
+manhattan(DMS=DMS, filename="Manhattan", sig=6.3)
+```
+
+## GO Analysis 
+```{r, GO Analysis}
+
+# Perform Gene Ontology (GO) analysis using the 'gometh' function
+# Input:
+#   - sigDMP: Data frame with significantly differentially methylated positions
+#   - DMPs: Data frame with all differentially methylated positions
+#   - collection: Gene set collection for enrichment analysis (e.g., "KEGG")
+#   - array.type: Type of methylation array used (e.g., "EPIC")
+#   - anno: Annotation object (e.g., 'ann')
+
+go_analysis.all <- gometh(sig.cpg = row.names(sigDMP), all.cpg = row.names(DMPs), 
+                          collection = "KEGG", array.type = "EPIC", anno = ann)
+
+
+# Print the number of rows (observations) in the 'sigDMP' and 'DMPs' data frames
+nrow(sigDMP)
+nrow(DMPs)
+
+# Print the sum of differentially expressed (DE) positions identified in GO analysis
+# The DE positions represent the ones with significant enrichment in the specified gene set collection
+sum(go_analysis.all$DE)
+
+# Print the total number of positions analyzed in GO analysis
+sum(go_analysis.all$N)
+
+# Extract the top 10 results from the GO analysis
+top_10 <- topGSA(go_analysis.all, 10)
+
+# Print or further analyze the top 10 results
+top_10
+```
+
+## KEGGA
+```{r, KEGGA Analysis}
+
+# Extract Entrez Gene IDs for significantly differentially methylated positions (DMPs)
+sig_genes <- getMappedEntrezIDs(sig.cpg = row.names(sigDMP), all.cpg = row.names(DMPs), array.type = "EPIC", anno = ann)
+
+# Perform KEGG pathway analysis using Entrez Gene IDs
+# Input:
+#   - sig_genes$sig.eg: Entrez Gene IDs for significantly differentially methylated positions
+#   - sig_genes$universe: Entrez Gene IDs for all differentially methylated positions
+#   - species: Species for which KEGG pathway analysis is performed (e.g., "Hs" for Homo sapiens)
+kegga_results <- kegga(sig_genes$sig.eg, universe = sig_genes$universe, species = "Hs")
+
+# Arrange the results by adjusted p-value (P.DE)
+kegga_results <- kegga_results %>% arrange(P.DE)
+
+# Add a new column 'KEGG_label' containing row names (KEGG pathway labels)
+kegga_results$KEGG_label <- rownames(kegga_results)
+
+# Display the first few rows of the KEGG pathway analysis results
+head(kegga_results)
+
+# Extract top KEGG pathway enrichment results using the 'topKEGG' function
+KEGG_enrich <- topKEGG(kegga_results)
+
+# Display the top KEGG pathway enrichment results
+KEGG_enrich
+```
+
+
 
 
 
